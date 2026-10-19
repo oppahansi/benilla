@@ -108,7 +108,7 @@ fn rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// What a constant argument (`crate::realmlist::CVAR_REALMLIST`) names: the `&str` literal of its
+/// What a constant argument (`super::CVAR_REALMLIST`) names: the `&str` literal of its
 /// `const NAME: &str = "…";` in this crate, as the generator greps it.
 fn const_str(path: &str) -> Option<String> {
     let name = path.rsplit("::").next()?;

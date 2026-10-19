@@ -295,8 +295,8 @@ LC_ALL=C sort -t "$(printf '\t')" -k1,1 -k2,2 -k3,3 -k4,4n "$tmp/code.tsv" > "$t
 # Stage 2: the `Deviates` rows of the CVar table. The whole file is scanned as a token stream
 # (comments, strings and char literals skipped), so a call may sit on one line or twelve. A literal
 # is read with Rust's `\`-newline continuation and `\"`/`\\` escapes; a constant argument
-# (`crate::realmlist::CVAR_REALMLIST`) is resolved to its `const NAME: &str = "…";` in the crates.
-# `cvars::tests::the_deviates_rows_are_what_the_generator_reads` pins this reading to the table.
+# (`super::CVAR_REALMLIST`) is resolved to its `const NAME: &str = "…";` in the crates.
+# benilla-ui's `client_cvars::deviations_doc` test pins this reading to the table.
 LC_ALL=C awk '
   { src = src $0 "\n" }
   function resolve(e,   id, cmd, line) {
@@ -370,7 +370,7 @@ LC_ALL=C awk '
       }
       i++
     }
-  }' crates/benilla-app/src/cvars/table.rs 2>/dev/null \
+  }' crates/benilla-ui/src/script/client_cvars/table.rs 2>/dev/null \
   | LC_ALL=C sort -f -t "$(printf '\t')" -k1,1 > "$tmp/cvars.tsv"
 
 # Markdown-escape outside code spans (an odd backtick count means no spans: every backtick escaped).

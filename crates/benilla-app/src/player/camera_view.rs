@@ -33,31 +33,12 @@ use super::Player;
 /// The reference's five views, through the UI crate's constant so the Lua range check agrees.
 const VIEW_COUNT: usize = CAMERA_VIEW_COUNT as usize;
 
-/// The live view's CVar (`0x84fdc8`), holding the internal index as `"%d"` (`0x512ef1`).
-pub(crate) const CVAR_ACTIVE_VIEW: &str = "cameraView";
-
-/// The fifteen saved-view CVars, `[view][field]` (distance, pitch, yaw), as `0x50b9b0` composes
-/// them; [`crate::cvars::REGISTERED`] must hold the same names (tested).
-pub(crate) const VIEW_CVARS: [[&str; 3]; VIEW_COUNT] = [
-    ["cameraDistance", "cameraPitch", "cameraYaw"],
-    ["cameraDistanceA", "cameraPitchA", "cameraYawA"],
-    ["cameraDistanceB", "cameraPitchB", "cameraYawB"],
-    ["cameraDistanceC", "cameraPitchC", "cameraYawC"],
-    ["cameraDistanceD", "cameraPitchD", "cameraYawD"],
-];
-
-/// The reference's default strings (`0x84f488`), kept as text: [`crate::cvars`]'s file is a diff
-/// against the registered default string, so a reset strips the key only by writing this text.
-pub(crate) const VIEW_DEFAULTS: [[&str; 3]; VIEW_COUNT] = [
-    ["0.0", "0.0", "0.0"],
-    ["5.55", "10.0", "0.0"],
-    ["5.55", "20.0", "0.0"],
-    ["13.88", "30.0", "0.0"],
-    ["13.88", "10.0", "0.0"],
-];
-
-/// [`CVAR_ACTIVE_VIEW`]'s default (`[0x84f484]`): internal index 1, `THIRD_PERSON_A`.
-pub(crate) const ACTIVE_VIEW_DEFAULT: &str = "1";
+/// The live view's CVar, the fifteen saved-view CVars (`[view][field]`: distance, pitch, yaw)
+/// and their default strings, from the client table; [`crate::cvars::REGISTERED`] must hold the
+/// same names (tested).
+pub(crate) use benilla_ui::script::client_cvars::{
+    ACTIVE_VIEW_DEFAULT, CVAR_ACTIVE_VIEW, VIEW_CVARS, VIEW_DEFAULTS,
+};
 
 /// One view's pose: yards, radians with [`FlyCam::pitch`]'s up-positive sign, and `yaw` as an
 /// offset from the subject's facing, which the reference re-adds every frame (`0x50f7f2`).

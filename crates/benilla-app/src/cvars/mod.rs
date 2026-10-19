@@ -4,10 +4,10 @@
 //! what `config.toml` is composed from; the script VM keeps a mirror for Lua's synchronous
 //! `GetCVar`/`SetCVar` ([`benilla_ui::script::UiScript::seed_cvars`]) whose writes queue back here.
 //!
-//! - [`REGISTERED`] holds the vars something reads, a host knob or a Lua consumer, and
-//!   [`inert::INERT`] the reference's other script-visible ones, which `GetCVar` and `SetCVar`
-//!   would otherwise raise on. A row's default is the reference's, and
-//!   [`table::Registered::reference`] says where it stands against it.
+//! - The table is benilla-ui's ([`benilla_ui::script::client_cvars`]): [`REGISTERED`] holds the
+//!   vars something reads, a host knob or a Lua consumer, and [`INERT`] the reference's other
+//!   script-visible ones, which `GetCVar` and `SetCVar` would otherwise raise on. A row's default
+//!   is the reference's, and [`Registered::reference`] says where it stands against it.
 //! - The change callback is a Bevy observer on [`CvarChanged`], beside the knob it writes; the
 //!   registry applies nothing itself. A callback that can refuse a write is also the row's
 //!   [`CvarCheck`], which the registry and the VM's mirror run before storing.
@@ -31,19 +31,24 @@ use bevy::prelude::*;
 use crate::ui_script::VmMemo;
 use benilla_ui::script::{CvarCheck, CvarWrite, SeededCvar, UiScript};
 
-#[cfg(test)]
-mod deviations_doc;
-mod inert;
 mod listing;
 #[cfg(test)]
 mod reference_table;
-mod table;
+#[cfg(test)]
+use benilla_ui::script::client_cvars::Reference;
+#[cfg(doc)]
+use benilla_ui::script::client_cvars::Registered;
+use benilla_ui::script::client_cvars::INERT;
+pub(crate) use benilla_ui::script::client_cvars::{all_rows, REGISTERED};
 #[cfg(test)]
 pub(crate) use listing::list_rank;
 pub(crate) use listing::reference_help;
-#[cfg(test)]
-use table::Reference;
-pub(crate) use table::{all_rows, registered_pairs, REGISTERED};
+
+/// The table as the script VM's registrar wants it: `(name, default)` pairs in table order, at
+/// the install's locale ([`benilla_ui::script::client_cvars::client_table`]).
+pub(crate) fn registered_pairs() -> impl Iterator<Item = (&'static str, &'static str)> {
+    benilla_ui::script::client_cvars::client_table(crate::ui_script::client_locale().index())
+}
 
 /// `config.toml`: a `[cvars]` table of `Name = "value"` strings, sorted so every save is stable.
 #[derive(serde::Serialize, serde::Deserialize, Default)]
@@ -111,7 +116,7 @@ pub(crate) struct Row {
     pub(crate) pending: Option<String>,
     /// The reference's flag bit1.
     pub(crate) latched: bool,
-    /// The change callback's refusal ([`table::Registered::check`]).
+    /// The change callback's refusal ([`Registered::check`]).
     check: Option<CvarCheck>,
     /// The reset text (`rec+0x34`) `cvar_reset` restores (`0x63dff0`): the value `config.toml`
     /// held at start-up, as `Config.wtf`'s `set` makes the record with it (`0x63d582`) and the
@@ -128,7 +133,7 @@ pub(crate) enum SetOutcome {
     /// The row is read-only (flag bit2, `CVar::SetReadOnly` `0x63e030`): `InternalSet` returns
     /// before storing anything (`0x63e0ba`-`0x63e0c2`).
     ReadOnly,
-    /// The row's change callback refused it ([`table::Registered::check`]): the applied value
+    /// The row's change callback refused it ([`Registered::check`]): the applied value
     /// stands, and the callback's own line says why.
     Vetoed,
     /// Already the applied value (or already the staged one).
@@ -143,7 +148,7 @@ pub(crate) enum SetOutcome {
 #[derive(Resource)]
 pub(crate) struct Cvars {
     /// The client's locale index (`[0xc0e080]`), which the register sites that pick their default
-    /// by it read ([`table::Reference::SameByLocale`]).
+    /// by it read ([`Reference::SameByLocale`]).
     locale: usize,
     rows: Vec<Row>,
     /// Lowercased name → row.
@@ -185,12 +190,12 @@ impl Default for Cvars {
 
 impl Cvars {
     /// The table as a client of this locale index registers it: each row at its
-    /// [`table::Registered::default_for`].
+    /// [`Registered::default_for`].
     pub(crate) fn for_locale(locale: usize) -> Self {
         let mut cvars = Self {
             locale,
-            rows: Vec::with_capacity(REGISTERED.len() + inert::INERT.len()),
-            index: HashMap::with_capacity(REGISTERED.len() + inert::INERT.len()),
+            rows: Vec::with_capacity(REGISTERED.len() + INERT.len()),
+            index: HashMap::with_capacity(REGISTERED.len() + INERT.len()),
             file: BTreeMap::new(),
             session_owned: HashSet::new(),
             events: Vec::new(),
@@ -227,7 +232,7 @@ pub(crate) fn registered_default(name: &str, locale: usize) -> Option<&'static s
 
 impl Cvars {
     /// Queue the move onto each row this locale registers off its base default
-    /// ([`table::Reference::SameByLocale`]), which a session does not own: a knob starts at the
+    /// ([`Reference::SameByLocale`]), which a session does not own: a knob starts at the
     /// base, and the reference's callback runs on the registered string (`0x63dc58`). Before the
     /// file's own moves, so a saved value lands on top.
     fn announce_locale_defaults(&mut self) {

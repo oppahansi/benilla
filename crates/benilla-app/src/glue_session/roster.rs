@@ -114,10 +114,8 @@ impl Roster {
     }
 }
 
-/// The 1.12 CVar the select screen remembers the character entered as by: registered at
-/// `0x402d93` (name `0x82e8f8`, default `"0"`, pointer at `[0x882674]`), written by `EnterWorld`
-/// (`0x46b5fa`), named by no GlueXML.
-pub(crate) const CVAR_LAST_CHARACTER: &str = "lastCharacterIndex";
+/// The 1.12 CVar the select screen remembers the character entered as by, from the client table.
+pub(crate) use benilla_ui::script::client_cvars::CVAR_LAST_CHARACTER;
 
 /// Ask the parked IO thread to log in as `guid` and remember it as pending, so a reconnect
 /// re-answers with its character.

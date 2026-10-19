@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use super::table::{all_rows, Reference};
+use benilla_ui::script::client_cvars::{all_rows, Reference};
 
 /// `same` rows whose shipped default is not yet the registered string, each with the issue that
 /// fixes it. The test fails on any other, and on a listed row that has come right.
