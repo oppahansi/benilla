@@ -9,6 +9,9 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
 
+use benilla_ui::interface;
+#[cfg(test)]
+use benilla_ui::interface::is_lua;
 use benilla_ui::script::UiScript;
 use benilla_ui::status::{self, Status};
 use benilla_ui::toc::Toc;
@@ -76,13 +79,7 @@ impl Addon {
     /// `.lua` reaches Lua as it is on disk.
     fn read(&self, req: &str) -> Option<Vec<u8>> {
         match &self.source {
-            Source::Builtin => {
-                let norm = req.replace('\\', "/");
-                let base = norm.rsplit('/').next().unwrap_or(&norm).to_string();
-                content::read(&norm)
-                    .or_else(|| content::read(&base))
-                    .map(String::into_bytes)
-            }
+            Source::Builtin => interface::read_flat(&content::read_bytes, req),
             Source::Dir(root) => read_addon_file(root, req),
             Source::Chain => super::reference_ui::read(req),
         }
@@ -102,17 +99,6 @@ impl Addon {
         }
     }
 
-    /// The chunk name, which addons parse: `"@%s"` (`0x8716e0`) over the resolved install path,
-    /// built by `0x704bc0` for every `.lua`, as for `<Script file=>`. Ace2 libraries find their
-    /// addon by splitting a `debugstack` frame on `\AddOns\` (`AceDB-2.0.lua:742`). The shipped
-    /// flat tree keeps [`benilla_ui::script::addon_chunk_name`].
-    fn chunk_name(&self, file: &str, path: &str) -> String {
-        match &self.source {
-            Source::Builtin => benilla_ui::script::addon_chunk_name(&self.name, file),
-            Source::Dir(_) | Source::Chain => format!("@{}", path.replace('/', "\\")),
-        }
-    }
-
     /// Load this addon's `.toc`-listed files, in listed order, reporting into `toc`, the `.toc`'s
     /// load record. Each error is logged as it happens and also returned, tagged
     /// `"<Addon>/<file>: <error>"`, for the tests to assert empty.
@@ -125,121 +111,46 @@ impl Addon {
         self.load_files_into(script, files, &mut Status::default())
     }
 
-    /// [`Addon::load`] over an explicit slice. A manifest lists both kinds of file (the
-    /// reference's `FrameXML.toc` opens with `GlobalStrings.lua`): a `.lua` runs as a chunk in the
-    /// shared state, anything else is parsed as FrameXML and materialized. What the reference's
-    /// `.toc` runner (`0x6edb90`) reports goes into `toc`: a file that did not open or parse, and
-    /// each document's own record under its banner.
+    /// [`Addon::load`] over an explicit slice, through benilla-ui's walk
+    /// ([`benilla_ui::interface::load_files_into`]), which reports what the reference's `.toc`
+    /// runner (`0x6edb90`) does into `toc`. The chunk names addons parse are `"@%s"` over the
+    /// resolved install path for a `Dir` and the chain; the shipped flat tree keeps
+    /// [`benilla_ui::script::addon_chunk_name`]. A missing file is an ERROR when the manifest is
+    /// ours or the core's (a shipped file, or a `FrameXML.toc` row the player's chain lacks); a
+    /// player's addon is the package's fault, which the reference skips silently, and an ERROR
+    /// line fails `smoke.sh`.
     pub(super) fn load_files_into(
         &self,
         script: &UiScript,
         files: &[String],
         toc: &mut Status,
     ) -> Vec<String> {
-        let mut failures = Vec::new();
-        // The `<Include>` / `<Script file=>` provider; `read` is the sandbox.
-        let provider = |req: &str| -> Option<Vec<u8>> { self.read(req) };
-        for file in files {
-            // Resolved once into the source's path space, for `read` and the loader alike.
-            let path = benilla_ui::loader::join_ref(&self.prefix(), file);
-            let Some(bytes) = self.read(&path) else {
-                toc.report(status::FAILURE, status::missing(&path, is_lua(file)));
-                let e = format!("{}/{file}: not found", self.name);
-                // Severity follows whose manifest is wrong. Ours, or the core's (a shipped file, or
-                // a `FrameXML.toc` row the player's chain lacks), is an ERROR. A player's addon is
-                // the package's fault, which the reference skips silently, and an ERROR line fails
-                // `smoke.sh`.
-                match self.source {
-                    Source::Builtin | Source::Chain => error!("ui_script: {e}"),
-                    Source::Dir(_) => warn!("ui_script: {e}"),
-                }
-                // Retained for the player: the commonest way an addon fails with nothing on screen.
-                script.report_load_failure(&e);
-                failures.push(e);
-                continue;
-            };
-            if is_lua(file) {
-                // What `<Script file=>` gets: one chunk in the one global state, in manifest
-                // order, as `AddOn_Load 0x51f240` hands every listed file to `0x6edb90`.
-                match script.run_chunk_named(&bytes, &self.chunk_name(file, &path)) {
-                    Ok(()) => info!("ui_script: {}/{file} ran", self.name),
-                    Err(err) => {
-                        let e = format!("{}/{file}: {err}", self.name);
-                        error!("ui_script: {e}");
-                        // A script error: it reaches the player through the Lua error handler.
-                        script.report_script_error(&e, &benilla_ui::script::lua_message(&err));
-                        failures.push(e);
-                    }
-                }
-                continue;
-            }
-            let doc = match benilla_ui::framexml::parse(&benilla_ui::source::decode(&bytes)) {
-                Ok(d) => d,
-                Err(e) => {
-                    toc.report(status::FAILURE, status::unparsed(&path));
-                    let e = format!("{}/{file}: {e}", self.name);
-                    error!("ui_script: parsing {e}");
-                    // No dialog, as the reference only logs it (FrameXML.log); still retained.
-                    script.report_load_failure(&e);
-                    failures.push(e);
-                    continue;
-                }
-            };
-            // The loader resolves relative references against the document's own directory, and
-            // names the file a raise came from.
-            let mut report = benilla_ui::loader::load_in(script, &doc, &path, &provider);
-            std::mem::take(&mut report.status).close_into(
-                toc,
-                script.framexml_debug(),
-                status::file_banner(&path),
-            );
-            // `FrameXML_Debug` traces go to the log only: the reference files them at severity 0
-            // (`0x6ee2bc`) in a per-document record whose surface is untraced.
-            for t in &report.traces {
-                info!("ui_script({}/{file}): {t}", self.name);
-            }
-            for w in &report.warnings {
-                warn!("ui_script({}/{file}): {w}", self.name);
-                // Retained for `/errors` too, here because only this caller knows the file.
-                script.report_warning(&format!("{}/{file}: {w}", self.name));
-            }
-            // A file the document names and the provider lacks is a `.toc` line naming no file:
-            // never a script error, as the reference logs `Couldn't open %s` and carries on, but a
-            // `failures` entry, so our boot tests catch one in a core or layer document.
-            for m in &report.missing_files {
-                let e = format!("{}/{file}: {m}", self.name);
-                match self.source {
-                    Source::Builtin | Source::Chain => error!("ui_script: {e}"),
-                    Source::Dir(_) => warn!("ui_script: {e}"),
-                }
-                script.report_load_failure(&e);
-                failures.push(e);
-            }
-            for (e, heard) in report.raised() {
-                error!("ui_script({}/{file}): {e}", self.name);
-                // A script error, as in the Lua arm; `_ERRORMESSAGE`'s IsVisible guard shows only
-                // a burst's first, as in the reference.
-                script.report_script_error(&format!("{}/{file}: {e}", self.name), heard);
-                failures.push(format!("{}/{file}: {e}", self.name));
-            }
-            info!(
-                "ui_script: {}/{file} loaded ({} frames materialized)",
-                self.name, report.frames
-            );
-        }
-        failures
+        let read = |req: &str| -> Option<Vec<u8>> { self.read(req) };
+        let prefix = self.prefix();
+        let source = interface::Files {
+            name: &self.name,
+            prefix: &prefix,
+            read: &read,
+            chunks: match self.source {
+                Source::Builtin => interface::Chunks::Addon,
+                Source::Dir(_) | Source::Chain => interface::Chunks::Path,
+            },
+            strict: !matches!(self.source, Source::Dir(_)),
+        };
+        interface::load_files_into(script, &source, files, toc, &mut log_line)
+            .into_iter()
+            .flat_map(|row| row.failures)
+            .collect()
     }
 }
 
-/// Whether a manifest entry is a Lua chunk: by extension, case-insensitively, with `\` a
-/// separator like `/` (a `.toc` is written for a Windows client).
-fn is_lua(entry: &str) -> bool {
-    entry
-        .rsplit(['/', '\\'])
-        .next()
-        .unwrap_or(entry)
-        .rsplit_once('.')
-        .is_some_and(|(_, ext)| ext.eq_ignore_ascii_case("lua"))
+/// One line of benilla-ui's interface walk into the log, at its severity.
+pub(super) fn log_line(severity: interface::Severity, line: &str) {
+    match severity {
+        interface::Severity::Info => info!("{line}"),
+        interface::Severity::Warn => warn!("{line}"),
+        interface::Severity::Error => error!("{line}"),
+    }
 }
 
 /// The one file namespace, install-relative, as in the reference: `0x647e60` answers a name from

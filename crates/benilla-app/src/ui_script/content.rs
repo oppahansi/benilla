@@ -14,6 +14,12 @@ pub(super) fn read(req: &str) -> Option<String> {
     UI.get_file(req)?.contents_utf8().map(str::to_owned)
 }
 
+/// [`read`] as bytes, the shape benilla-ui's interface walk reads files in
+/// ([`benilla_ui::interface::Read`]).
+pub(super) fn read_bytes(req: &str) -> Option<Vec<u8>> {
+    read(req).map(String::into_bytes)
+}
+
 /// `assets/ui/<req>` on disk, or `None` in a player build, whose binary holds no source path.
 fn read_source_tree(req: &str) -> Option<String> {
     let dir = crate::run_mode::dev_source_dir()?.join("assets/ui");

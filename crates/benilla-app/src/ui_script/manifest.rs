@@ -1,17 +1,22 @@
 //! The in-game interface: the core, the player's own stock FrameXML as their chain's
 //! `FrameXML.toc` lists it ([`reference_ui::core`]) and then its `Bindings.xml`
 //! ([`load_core_bindings`]), then benilla's layer, [`LAYER_MANIFEST`], every entry of which is
-//! ours and loads after the whole core.
+//! ours and loads after the whole core. The walk is benilla-ui's
+//! ([`benilla_ui::interface::load_interface`]), over the chain ([`reference_ui::read`]) and the
+//! shipped tree ([`super::content`]).
 
 use bevy::prelude::*;
 
+use benilla_ui::interface;
 use benilla_ui::script::UiScript;
 
+use super::addons::log_line;
+#[cfg(test)]
 use super::addons::Addon;
-use super::reference_ui;
+use super::{content, reference_ui};
 
 /// benilla's own interface, one layer on the stock one, relative to `assets/ui`.
-pub(super) const LAYER_MANIFEST: &str = "layer.toc";
+pub(super) const LAYER_MANIFEST: &str = interface::LAYER_MANIFEST;
 
 /// Whether this run loads the layer: always in a player build; a dev build boots the stock UI
 /// alone under `WOW_STOCK_UI=1`.
@@ -44,18 +49,6 @@ pub(super) fn shipped_manifest_files() -> Vec<String> {
         .into_iter()
         .filter(|f| !reference_ui::is_chain_entry(f))
         .collect()
-}
-
-/// Runs `UIParent_ManageFramePositions` after the interface has loaded. The buff rows keep
-/// `BuffFrame.xml`'s anchors past it: `BuffFrame_OnLoad` never pitches them, and the stock
-/// `UIOptionsFrame.lua` does it on `VARIABLES_LOADED` (l.206), after every addon (`0x4900a3`, then
-/// `0x4900b2`).
-fn bootstrap_positions(script: &UiScript) -> Vec<String> {
-    if let Err(e) = script.run("UIParent_ManageFramePositions()") {
-        error!("ui_script: managed-positions bootstrap: {e}");
-        return vec![format!("managed-positions bootstrap: {e}")];
-    }
-    Vec::new()
 }
 
 /// What a screen-size or UI-scale change re-runs, from `extract::tick_script`: anchors follow the
@@ -133,14 +126,7 @@ pub(crate) fn load_default_ui(script: &UiScript) -> Vec<String> {
     // and a bare `UiScript::new()` has only `benilla-ui`'s own. A re-register only refreshes
     // defaults.
     script.register_cvars(crate::cvars::registered_pairs());
-    let mut failures = silenced_ui_load(&mut &*script, |script| {
-        let mut failures = load_core(script);
-        if layer_enabled() {
-            failures.extend(load_layer(script));
-        }
-        failures.extend(bootstrap_positions(script));
-        failures
-    });
+    let mut failures = silenced_ui_load(&mut &*script, |script| load_walk(script, layer_enabled()));
     // A raise one call below the loader's own dispatch (an OnLoad that shows a frame whose OnShow
     // raises) lands in the VM's error list, not the loader's report; it is a load failure too.
     failures.extend(
@@ -152,75 +138,32 @@ pub(crate) fn load_default_ui(script: &UiScript) -> Vec<String> {
     failures
 }
 
-/// The core: every row of the chain's `FrameXML.toc`, in its order, each file in document order,
-/// then the chain's `Bindings.xml`. A chain without the toc builds no stock interface: the runner
-/// reports `"Couldn't open %s"` (`0x846ff4`) at severity 2 (`0x6edc3f`) and returns 0, which
-/// `UI_Init` never reads (`0x48fff2`), going on to `Bindings.xml` and the addons. benilla goes on
-/// the same way and reports it as a load failure, an `ERROR` line and a row in `/errors`.
-///
-/// Deviation: no `FrameXML.toc` signature check, where `UI_Init` loads on a failed one and then
-/// quits (`0x401560(0xa)` at `0x48ff90`), because the check verifies Blizzard's signature with a key
-/// carried in the client binary, which benilla does not ship, and a modified interface file is
-/// loaded rather than refused.
+/// The core and its `Bindings.xml`, off the player's chain
+/// ([`benilla_ui::interface::load_core`]). Returns every failure.
+#[cfg(test)]
 pub(super) fn load_core(script: &UiScript) -> Vec<String> {
-    let Some(core) = reference_ui::core() else {
-        let e = format!(
-            "{}: not found — the stock interface is not built",
-            reference_ui::TOC
-        );
-        error!("ui_script: {e}");
-        script.report_load_failure(&e);
-        // Into the UI load's own record, before any banner (`0x6edc3f`).
-        let mut log = benilla_ui::status::Status::default();
-        log.report(
-            benilla_ui::status::FAILURE,
-            benilla_ui::status::missing(reference_ui::TOC, false),
-        );
-        script.report_load_status(log);
-        let mut failures = vec![e];
-        failures.extend(load_core_bindings(script));
-        return failures;
-    };
-    let mut toc = benilla_ui::status::Status::default();
-    let mut failures = core.load_files_into(script, &core.toc.files, &mut toc);
-    let mut log = benilla_ui::status::Status::default();
-    let banner = benilla_ui::status::toc_banner(reference_ui::TOC);
-    toc.close_into(&mut log, script.framexml_debug(), banner);
-    script.report_load_status(log);
-    failures.extend(load_core_bindings(script));
-    failures
+    interface::load_core(script, &reference_ui::read, &mut log_line).failures
 }
 
-/// The stock key-binding commands, `UI_Init`'s next step after the toc walk: the chain's
-/// `Interface\FrameXML\Bindings.xml` (`0x842f9c`), when the chain has it (`0x48fff9`), through
-/// the loader addons' files go through (`0x4b6f70`, called at `0x490018` here and `0x51f443` for
-/// an addon). Every command benilla has is a row of this file, its body the file's own Lua.
+/// The chain's `Bindings.xml` ([`benilla_ui::interface::load_core_bindings`]): no failure, or the
+/// parse's.
+#[cfg(test)]
 pub(super) fn load_core_bindings(script: &UiScript) -> Vec<String> {
-    let Some(bytes) = reference_ui::read(reference_ui::BINDINGS) else {
-        warn!(
-            "ui_script: {} is not in the patch chain — no key binding has a command",
-            reference_ui::BINDINGS
-        );
-        return Vec::new();
+    interface::load_core_bindings(script, &reference_ui::read, &mut log_line)
+        .err()
+        .into_iter()
+        .collect()
+}
+
+/// The core, then the layer when `layer`, then `UIParent_ManageFramePositions`
+/// ([`benilla_ui::interface::load_interface`]). Returns every failure, a loader error tagged
+/// `"<Addon>/<file>: <error>"`.
+fn load_walk(script: &UiScript, layer: bool) -> Vec<String> {
+    let sources = interface::Sources {
+        chain: &reference_ui::read,
+        layer: layer.then_some(&content::read_bytes as interface::Read),
     };
-    match benilla_ui::bindings_xml::parse(&benilla_ui::source::decode(&bytes)) {
-        Ok(bindings) => {
-            script.register_bindings(&bindings);
-            info!(
-                "bindings: {} commands registered from {}",
-                bindings.len(),
-                reference_ui::BINDINGS
-            );
-            Vec::new()
-        }
-        // `"Couldn't parse XML in %s"` (`0x846fd8`) at severity 2 (`0x4b700c`).
-        Err(e) => {
-            let e = format!("{}: {e}", reference_ui::BINDINGS);
-            error!("ui_script: {e}");
-            script.report_load_failure(&e);
-            vec![e]
-        }
-    }
+    interface::load_interface(script, &sources, &mut log_line).failures
 }
 
 /// The defaults, set 0, off the player's chain: `WTF\DefaultBindings.wtf` (`0x846e44`), which
@@ -259,13 +202,6 @@ pub(crate) fn load_stock_bindings(script: &mut UiScript) {
     );
 }
 
-/// Every [`LAYER_MANIFEST`] entry, in order, after the whole core: the layer loads as more of the
-/// stock load, with no `ADDON_LOADED` and no registry row, as FrameXML does (`0x48ffed`).
-fn load_layer(script: &UiScript) -> Vec<String> {
-    let layer = Addon::layer();
-    layer.load_files(script, &layer.toc.files)
-}
-
 /// The in-game UI, the core, then the layer unless [`layer_enabled`] says no, then every
 /// third-party addon, on entering the world. The reference loads both in `CGGameUI::Initialize`
 /// (`0x48fbf0`), reached only from world entry (`0x401570` from `0x46c236`): `FrameXML.toc` at
@@ -295,11 +231,7 @@ pub(super) fn load_ingame_ui_with(
     // Bounded, addons included: a chunk that never returns fails as a load error instead of
     // freezing the loading screen. The caller disarms the budget once the edge is done.
     script.set_instruction_budget(super::addons::LOAD_INSTRUCTION_BUDGET);
-    let mut failures = load_core(script);
-    if layer {
-        failures.extend(load_layer(script));
-    }
-    failures.extend(bootstrap_positions(script));
+    let mut failures = load_walk(script, layer);
     // Each addon's `ADDON_LOADED` fires as that addon finishes, as the reference does (`0x51f5ad`).
     failures.extend(super::addons::load_third_party(
         script,
