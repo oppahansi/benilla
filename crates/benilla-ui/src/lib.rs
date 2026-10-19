@@ -9,6 +9,7 @@ pub mod bindings_xml;
 pub mod civil;
 pub mod color;
 pub mod framexml;
+pub mod interface;
 pub mod justify;
 pub mod layout;
 pub mod loader;

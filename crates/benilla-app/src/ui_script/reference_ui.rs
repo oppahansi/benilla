@@ -18,7 +18,7 @@ use super::addons::{Addon, Source};
 /// The addon name the stock files load under. FrameXML is not an addon: it gets no
 /// `ADDON_LOADED`, and [`Addon::chunk_name`] names its chunks by chain path, as the 1.12 client
 /// does, so an addon's `\AddOns\` debugstack pattern never matches a FrameXML frame.
-pub(super) const NAME: &str = "FrameXML";
+pub(super) const NAME: &str = benilla_ui::interface::CORE_NAME;
 
 /// Whether a test kit's entry comes off the player's chain: it has a path separator. Decidable
 /// because `assets/ui` is flat, which `manifest::tests` pins.
@@ -29,10 +29,11 @@ pub(super) fn is_chain_entry(entry: &str) -> bool {
 
 /// The stock interface's table of contents, which `UI_Init` (`0x48fbf0`) hands to the `.toc`
 /// runner (`0x6edb90`) at `0x48ffed`, once per UI build, `ReloadUI` included.
-pub(super) const TOC: &str = r"Interface\FrameXML\FrameXML.toc";
+pub(super) const TOC: &str = benilla_ui::interface::FRAMEXML_TOC;
 
 /// The stock key-binding commands, which `UI_Init` loads after the [`TOC`] walk (`0x490018`).
-pub(super) const BINDINGS: &str = r"Interface\FrameXML\Bindings.xml";
+#[cfg(test)]
+pub(super) const BINDINGS: &str = benilla_ui::interface::BINDINGS;
 
 /// The default key set, which `UI_Init` reads through `0x4b62b0` (`0x4900c7`).
 pub(super) const DEFAULT_BINDINGS: &str = r"WTF\DefaultBindings.wtf";
@@ -66,15 +67,7 @@ pub(super) fn glue() -> Option<Addon> {
 /// The interface `toc_text` lists, the `.toc` at chain path `toc_path`: its rows under the toc's
 /// own directory, in its order.
 fn toc_addon(name: &str, toc_path: &str, toc_text: &str) -> Addon {
-    let dir = toc_path.rsplit_once('\\').map_or("", |(d, _)| d);
-    named_addon(
-        name,
-        Toc::parse(toc_text)
-            .files
-            .iter()
-            .map(|f| format!("{dir}\\{f}"))
-            .collect(),
-    )
+    named_addon(name, benilla_ui::interface::toc_rows(toc_path, toc_text))
 }
 
 /// The stock interface as an [`Addon`] over the chain; `files` are full chain paths.
