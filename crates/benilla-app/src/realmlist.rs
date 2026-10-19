@@ -35,12 +35,8 @@ impl Plugin for RealmlistPlugin {
     }
 }
 
-/// The CVar name, the reference's spelling.
-pub(crate) const CVAR_REALMLIST: &str = "realmList";
-
-/// Deviation: the local machine's server, not the reference's
-/// `us.logon.worldofwarcraft.com:3724`, because that host no longer resolves.
-pub(crate) const DEFAULT_REALMLIST: &str = "localhost";
+/// The CVar name and its default, from the client table.
+pub(crate) use benilla_ui::script::client_cvars::{CVAR_REALMLIST, DEFAULT_REALMLIST};
 
 /// The dialog box's `letters` cap. Deviation: 64, where the reference's login boxes cap at 16
 /// (`AccountLogin.xml`), because a hostname needs more.

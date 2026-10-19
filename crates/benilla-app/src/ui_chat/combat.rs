@@ -166,10 +166,9 @@ impl Default for LogPeriodicSpells {
     }
 }
 
-pub(crate) const LOG_PERIODIC_CVAR: &str = "CombatLogPeriodicSpells";
-
-/// `CombatDeathLogRange`, registered at `0x626d5f` with default `"60"` (`0x862e14`).
-pub(crate) const DEATH_LOG_RANGE_CVAR: &str = "CombatDeathLogRange";
+/// `CombatLogPeriodicSpells` and `CombatDeathLogRange`, from the client table.
+pub(crate) use benilla_ui::script::client_cvars::{DEATH_LOG_RANGE_CVAR, LOG_PERIODIC_CVAR};
+/// `CombatDeathLogRange`'s default, `"60"` (`0x862e14`).
 pub(crate) const DEATH_LOG_RANGE_DEFAULT: f32 = 60.0;
 
 /// A unit's standing relative to the active player: the `0..9` index every combat-log selector
